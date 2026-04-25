@@ -1,0 +1,11 @@
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+mitmproxy==11.1.3
+httpx==0.28.1
+anthropic==0.52.0
+pydantic==2.11.2
+sqlalchemy==2.0.40
+aiosqlite==0.21.0
+websockets==15.0.1
+python-dotenv==1.1.0
+jinja2==3.1.6
