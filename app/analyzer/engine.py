@@ -9,6 +9,7 @@ Post-processing: CVSS scoring, confidence merging, deduplication.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Optional
@@ -82,7 +83,11 @@ async def analyze_single_request(
         return []
 
     # --- Stage 1: Algorithmic pre-analysis ---
-    pre_result = run_pre_analysis(
+    # Runs ~150 regexes over response bodies up to 50 KB (several ms of pure
+    # CPU). Offload to a thread so it does not block the event loop that is
+    # simultaneously draining the proxy capture queue and serving websockets.
+    pre_result = await asyncio.to_thread(
+        run_pre_analysis,
         method=req.method,
         url=req.url,
         content_type=req.content_type,
@@ -261,19 +266,27 @@ async def analyze_chain(
         return []
 
     # --- Run pre-analysis on each request for summary ---
-    all_pre_hints: list[str] = []
-    for req in requests:
-        pre = run_pre_analysis(
-            method=req.method,
-            url=req.url,
-            content_type=req.content_type,
-            request_headers=req.request_headers,
-            request_body=req.request_body,
-            status_code=req.status_code,
-            response_headers=req.response_headers,
-            response_body=req.response_body,
-            query_params=req.query_params,
+    # Offloaded to threads and gathered so a chain over many requests does not
+    # block the event loop (each pre-analysis is several ms of CPU).
+    pre_results = await asyncio.gather(
+        *(
+            asyncio.to_thread(
+                run_pre_analysis,
+                method=req.method,
+                url=req.url,
+                content_type=req.content_type,
+                request_headers=req.request_headers,
+                request_body=req.request_body,
+                status_code=req.status_code,
+                response_headers=req.response_headers,
+                response_body=req.response_body,
+                query_params=req.query_params,
+            )
+            for req in requests
         )
+    )
+    all_pre_hints: list[str] = []
+    for req, pre in zip(requests, pre_results):
         for hint in pre.hints:
             all_pre_hints.append(
                 f"- Request {req.id}: [{hint.category}] {hint.indicator} "

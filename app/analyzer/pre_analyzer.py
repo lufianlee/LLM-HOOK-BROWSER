@@ -753,6 +753,8 @@ _PRIVILEGED_FIELDS = {
     "privilege", "access_level", "accessLevel", "tier",
 }
 
+_PRIVILEGED_FIELDS_LOWER = {f.lower() for f in _PRIVILEGED_FIELDS}
+
 
 def _check_mass_assignment(
     method: str,
@@ -772,7 +774,7 @@ def _check_mass_assignment(
             data = json.loads(req_body)
             if isinstance(data, dict):
                 for key in data:
-                    if key.lower() in {f.lower() for f in _PRIVILEGED_FIELDS}:
+                    if key.lower() in _PRIVILEGED_FIELDS_LOWER:
                         found_fields.append(key)
     except (json.JSONDecodeError, TypeError):
         for field_name in _PRIVILEGED_FIELDS:

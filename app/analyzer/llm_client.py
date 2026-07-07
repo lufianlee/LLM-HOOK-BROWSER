@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
 import logging
 import os
+from collections import OrderedDict
 from urllib.parse import quote
 
 import httpx
@@ -99,11 +102,71 @@ async def ask_llm(system: str, user_message: str, max_tokens: int = 4096) -> str
     return response.content[0].text
 
 
-async def ask_llm_json(system: str, user_message: str, max_tokens: int = 4096) -> dict | list:
-    raw = await ask_llm(system, user_message, max_tokens)
+def _parse_llm_json(raw: str) -> dict | list:
     start = raw.find("[") if raw.find("[") < raw.find("{") or raw.find("{") == -1 else raw.find("{")
     end = max(raw.rfind("]"), raw.rfind("}"))
     if start == -1 or end == -1:
         logger.error("Failed to parse LLM JSON response: %s", raw[:200])
         return {}
     return json.loads(raw[start : end + 1])
+
+
+# --- Single-flight LRU cache -------------------------------------------------
+# Browsing fires many identical requests (polling, static endpoints, retries).
+# Analysing byte-identical (system, user_message) inputs always yields the same
+# result, so we memoise the raw LLM response. The in-flight map additionally
+# collapses concurrent duplicates: the second caller awaits the first's call
+# instead of issuing its own, preventing a thundering herd of identical calls.
+
+_cache: "OrderedDict[str, str]" = OrderedDict()
+_inflight: dict[str, asyncio.Future] = {}
+
+
+def _cache_key(system: str, user_message: str, max_tokens: int) -> str:
+    h = hashlib.sha256()
+    h.update(_model_id().encode())
+    h.update(b"\x00")
+    h.update(str(max_tokens).encode())
+    h.update(b"\x00")
+    h.update(system.encode())
+    h.update(b"\x00")
+    h.update(user_message.encode())
+    return h.hexdigest()
+
+
+async def ask_llm_json(system: str, user_message: str, max_tokens: int = 4096) -> dict | list:
+    if not settings.llm_cache_enabled:
+        return _parse_llm_json(await ask_llm(system, user_message, max_tokens))
+
+    key = _cache_key(system, user_message, max_tokens)
+
+    cached = _cache.get(key)
+    if cached is not None:
+        _cache.move_to_end(key)
+        logger.info("LLM cache hit (%s)", key[:12])
+        return _parse_llm_json(cached)
+
+    inflight = _inflight.get(key)
+    if inflight is not None:
+        raw = await inflight
+        return _parse_llm_json(raw)
+
+    loop = asyncio.get_event_loop()
+    fut: asyncio.Future = loop.create_future()
+    _inflight[key] = fut
+    try:
+        raw = await ask_llm(system, user_message, max_tokens)
+    except Exception as exc:
+        _inflight.pop(key, None)
+        if not fut.done():
+            fut.set_exception(exc)
+        raise
+    else:
+        _inflight.pop(key, None)
+        if not fut.done():
+            fut.set_result(raw)
+        _cache[key] = raw
+        _cache.move_to_end(key)
+        while len(_cache) > settings.llm_cache_size:
+            _cache.popitem(last=False)
+        return _parse_llm_json(raw)

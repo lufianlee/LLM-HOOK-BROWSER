@@ -31,10 +31,10 @@ class CapturedRequest(Base):
     __tablename__ = "captured_requests"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    method = Column(String(10), nullable=False)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+    method = Column(String(10), nullable=False, index=True)
     url = Column(Text, nullable=False)
-    host = Column(String(255), nullable=False)
+    host = Column(String(255), nullable=False, index=True)
     path = Column(Text, nullable=False)
     query_params = Column(Text, default="")
     request_headers = Column(Text, default="{}")
@@ -51,10 +51,10 @@ class Finding(Base):
     __tablename__ = "findings"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    request_id = Column(Integer, ForeignKey("captured_requests.id"), nullable=False)
-    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    request_id = Column(Integer, ForeignKey("captured_requests.id"), nullable=False, index=True)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
     vuln_type = Column(String(100), nullable=False)
-    severity = Column(Enum(Severity), nullable=False)
+    severity = Column(Enum(Severity), nullable=False, index=True)
     title = Column(String(500), nullable=False)
     description = Column(Text, nullable=False)
     evidence = Column(Text, default="")
@@ -67,7 +67,7 @@ class Finding(Base):
     attack_scenario = Column(Text, default="")
     false_positive_check = Column(Integer, default=0)
     pre_analysis_confidence = Column(Float, default=0.0)
-    is_chain = Column(Integer, default=0)
+    is_chain = Column(Integer, default=0, index=True)
     chain_id = Column(String(100), nullable=True)
 
     request = relationship("CapturedRequest", back_populates="findings")

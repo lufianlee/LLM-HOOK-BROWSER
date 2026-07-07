@@ -41,5 +41,14 @@ class Settings(BaseModel):
     max_history_for_chain: int = int(os.getenv("MAX_HISTORY_FOR_CHAIN", "50"))
     auto_analyze: bool = os.getenv("AUTO_ANALYZE", "true").lower() == "true"
 
+    # Number of concurrent analysis workers draining the analysis queue.
+    # Each worker can have one in-flight LLM call, so this bounds LLM concurrency.
+    analysis_workers: int = int(os.getenv("ANALYSIS_WORKERS", "4"))
+
+    # In-memory LLM response cache (keyed on the exact prompt) — collapses
+    # duplicate/repeated requests captured while browsing into a single LLM call.
+    llm_cache_enabled: bool = os.getenv("LLM_CACHE_ENABLED", "true").lower() == "true"
+    llm_cache_size: int = int(os.getenv("LLM_CACHE_SIZE", "512"))
+
 
 settings = Settings()

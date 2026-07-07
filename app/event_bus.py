@@ -25,11 +25,17 @@ async def broadcast(event_type: str, data: Any) -> None:
     if not _subscribers:
         return
     message = json.dumps({"type": event_type, "data": data}, default=str, ensure_ascii=False)
-    disconnected = []
-    for ws in _subscribers:
-        try:
-            await ws.send_text(message)
-        except Exception:
-            disconnected.append(ws)
-    for ws in disconnected:
-        await unsubscribe(ws)
+
+    # Snapshot before awaiting: the subscriber list may mutate (connect /
+    # disconnect) while the concurrent sends are in flight.
+    targets = list(_subscribers)
+
+    # Send to all subscribers concurrently so one slow client does not delay
+    # delivery to the others.
+    results = await asyncio.gather(
+        *(ws.send_text(message) for ws in targets),
+        return_exceptions=True,
+    )
+    for ws, result in zip(targets, results):
+        if isinstance(result, Exception):
+            await unsubscribe(ws)
